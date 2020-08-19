@@ -2,23 +2,37 @@ from PIL import Image
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+import copy as cp
 
-NUM_CHANNELS = 3
 IMG_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif')
-MAX_BRIGHTNESS = 255
-BRIGHTNESS = 0
-CONTRAST = 1
-GRAYSCALE = 2
-FLIP = 3
-STACKING = 4
-BLURRING = 5
-CHANGE_IMAGE = 6
-EXIT = 7
-STUFFS = ["Brightness", "Contrast", "Grayscale", "Flip", "Stacking", "Blurring", "Change image", "Exit"]
+MAX_VALUE = 255
+SHOW = 0
+BRIGHTNESS = SHOW + 1
+CONTRAST = BRIGHTNESS + 1
+GRAYSCALE = CONTRAST + 1
+FLIP = GRAYSCALE + 1
+STACKING = FLIP + 1
+BLURRING = STACKING + 1
+CHANGE_IMAGE = BLURRING + 1
+RESET = CHANGE_IMAGE + 1
+EXIT = RESET + 1
+STUFFS = ["Show", "Brightness", "Contrast", "Grayscale", "Flip", "Stacking", "Blurring", "Change image", "Reset", "Exit"]
+
 
 
 def is_image(entry):
     return entry.is_file() and entry.name.lower().endswith(IMG_EXTENSIONS) and entry.name
+
+
+def contrast_factor_evaluation(contrast):
+    return (259 * (contrast + 255)) / (255 * (259 - contrast))
+
+
+def int_input():
+    num = input()
+    while not num.isnumeric():
+        num = input("Invalid input, please input again: ")
+    return int(num)
 
 
 class MyImageEditor:
@@ -28,6 +42,7 @@ class MyImageEditor:
 
     def __init__(self, img_lst=None, tar=None, stuffs=None):
         self.images = img_lst if img_lst else []
+        self.origin = tar
         self.target = tar
         self.can_do = stuffs
 
@@ -45,12 +60,18 @@ class MyImageEditor:
         """
         with Image.open(self.images[index]) as img:
             self.target = np.array(img)
+            self.target = self.target.astype(int)
+            self.origin = cp.deepcopy(self.target)
 
-    def show_target(self):
+    def reset(self):
+        self.target = cp.deepcopy(self.origin)
+
+    def show_img(self, img=None):
         """
         Show current image
         """
-        plt.imshow(self.target)
+        img = img if img else self.target
+        plt.imshow(img)
         plt.show()
 
     def list_images(self):
@@ -78,14 +99,10 @@ class MyImageEditor:
         :param brightness_factor: Factor by which image increase or decrease.
         :param brightness_factor:
         """
-        for i in range(self.target.shape[0]):
-            for j in range(self.target.shape[1]):
-                for k in range(self.target.shape[2]):
-                    mul = int(self.target[i, j, k] * contrast_factor)
-                    s = self.target[i, j, k] + brightness_factor
-                    self.target[i, j, k] = mul if mul <= MAX_BRIGHTNESS else MAX_BRIGHTNESS
-                    self.target[i, j, k] = s if s <= MAX_BRIGHTNESS else MAX_BRIGHTNESS
-                    self.target[i, j, k] = s if s >= 0 else 0
+        self.target = (self.target - 128) * contrast_factor + 128 + brightness_factor
+        self.target[self.target > MAX_VALUE] = MAX_VALUE
+        self.target[self.target < 0] = 0
+        self.target = self.target.astype(int)
 
 
 if __name__ == "__main__":
@@ -93,17 +110,57 @@ if __name__ == "__main__":
     editor = MyImageEditor(stuffs=STUFFS)
     editor.update_images()
     editor.list_images()
-    selected = int(input("Select index of image in list that you want to adjust!\nYour choose: "))
+    # Select image
+    print("Select index of image in list that you want to adjust!\nYour choose: ", end="")
+    selected = int_input()
     while selected not in range(len(editor.images)):
-        selected = int(input("Invalid index please choose valid one in {}\nYour choose: "))
+        print("Invalid index, please input again: ")
+        selected = int_input()
     editor.set_target(index=selected)
+    # Program main stuff started
     selected = not EXIT
     while selected != EXIT:
+        # Show menu
         editor.show_menu()
-        selected = int(input("Your choose: "))
+        # Choose stuff
+        selected = input("Your choose: ")
+        while not selected.isnumeric():
+            selected = input("Invalid input, please input again: ")
+        selected = int(selected)
+        # Do stuff
         if selected == BRIGHTNESS:
-            factor = int(input("Input factor to adjust brightness must be in range [-100:100] for best: "))
+            # Input factor
+            factor = input("Input factor to adjust brightness must be in range [-100:100] for best: ")
+            while not factor.isnumeric():
+                factor = input("Invalid input, please input again: ")
+            factor = int(factor)
+            # Adjusting
+            print("Adjusting ...")
             editor.adjust_contrast_brightness(brightness_factor=factor)
-            editor.show_target()
+            print("Done. Check it out.")
+            # Show result
+            editor.show_img()
+        elif selected == CONTRAST:
+            # Input level
+            print("Input level of contrast to adjust brightness must be in range [-255:255] to work properly: ", end="")
+            level = int_input()
+            # Evaluate factor
+            factor = contrast_factor_evaluation(level)
+            print("Factor is:", factor)
+            # Adjusting
+            print("Adjusting ...")
+            editor.adjust_contrast_brightness(contrast_factor=factor)
+            # Show
+            print("Done. Check it out.")
+            editor.show_img()
+        elif selected == SHOW:
+            print("Showing target image")
+            editor.show_img()
+            print("Done.")
+        elif selected == RESET:
+            print("Resetting ...")
+            editor.reset()
+            print("Done. Check it out.")
+            editor.show_img()
         else:
             print("This feature not available yet, please choose another feature")
