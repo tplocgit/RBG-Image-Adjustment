@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import os
 import copy as cp
 
+
 IMG_EXTENSIONS = ('.png', '.jpg', '.jpeg', '.tiff', '.bmp', '.gif')
 MAX_VALUE = 255
 SHOW = 0
@@ -16,8 +17,9 @@ BLURRING = STACKING + 1
 CHANGE_IMAGE = BLURRING + 1
 RESET = CHANGE_IMAGE + 1
 EXIT = RESET + 1
-STUFFS = ["Show", "Brightness", "Contrast", "Grayscale", "Flip", "Stacking", "Blurring", "Change image", "Reset", "Exit"]
-
+STUFFS = ["Show", "Brightness", "Contrast", "Grayscale", "Flip", "Stacking", "Blurring", "Target", "Reset", "Exit"]
+CONTRIBUTION = {"Red": 0.21, "Green": 0.72, "Blue": 0.11}
+BOX_RANGE = range(-1, 2)
 
 
 def is_image(entry):
@@ -39,12 +41,11 @@ class MyImageEditor:
     """
     Contains functions that adjust image
     """
-
     def __init__(self, img_lst=None, tar=None, stuffs=None):
-        self.images = img_lst if img_lst else []
-        self.origin = tar
-        self.target = tar
-        self.can_do = stuffs
+        self.images = img_lst if img_lst else []    # List of image that program can adjusts
+        self.origin = tar                           # Origin image
+        self.target = tar                           # Image selected
+        self.can_do = stuffs                        # List of stuff that program can do
 
     def update_images(self) -> None:
         """
@@ -53,12 +54,17 @@ class MyImageEditor:
         with os.scandir() as scanner:
             self.images = [entry.name for entry in scanner if is_image(entry)]
 
-    def set_target(self, index=None):
+    def truncate(self):
+        self.target[self.target > MAX_VALUE] = MAX_VALUE
+        self.target[self.target < 0] = 0
+        self.target = self.target.astype(int)
+
+    def set_target(self, tar_index=None):
         """
         Set target to adjusting
-        :param index: Index of target in list of images
+        :param tar_index: Index of target in list of images
         """
-        with Image.open(self.images[index]) as img:
+        with Image.open(self.images[tar_index]) as img:
             self.target = np.array(img)
             self.target = self.target.astype(int)
             self.origin = cp.deepcopy(self.target)
@@ -94,15 +100,76 @@ class MyImageEditor:
 
     def adjust_contrast_brightness(self, brightness_factor=0, contrast_factor=1.0) -> None:
         """
-        Adjusts brightness of image.
-        :param contrast_factor:
-        :param brightness_factor: Factor by which image increase or decrease.
-        :param brightness_factor:
+        Adjusts brightness and contrast of image.
+        :param contrast_factor: Factor by which contrast of image increase or decrease.
+        :param brightness_factor: Factor by which brightness of image increase or decrease.
         """
         self.target = (self.target - 128) * contrast_factor + 128 + brightness_factor
-        self.target[self.target > MAX_VALUE] = MAX_VALUE
-        self.target[self.target < 0] = 0
+        self.truncate()
+
+    def flip(self, lr=True):
+        """
+        Flip image in order left-right or up-down
+        :param lr: Is flip left to right
+        """
+        self.target = np.fliplr(self.target) if lr else np.flipud(self.target)
+
+    def gray_evaluation(self):
+        """
+        Evaluate gray colors of all pixel
+        :return: Gray colors that evaluated
+        """
+        red = self.target[:, :, 0]
+        green = self.target[:, :, 1]
+        blue = self.target[:, :, 2]
+        return red * CONTRIBUTION["Red"] + green * CONTRIBUTION["Green"] + blue * CONTRIBUTION["Blue"]
+
+    def grayscale(self):
+        """
+        Convert RGB color to RBG grayscale
+        """
+        gray = self.gray_evaluation()
+        for i in range(self.target.shape[2]):
+            self.target[:, :, i] = gray
         self.target = self.target.astype(int)
+
+    def stack(self, grayscale_img):
+        """
+        Stack 2 images together
+        :param grayscale_img: grayscale-image with which target stack
+        :return: Success or not
+        """
+        # Check size
+        if self.target.shape != grayscale_img.shape:
+            print("2 images not same size, please pick another image")
+            return False
+        # Grayscale self
+        self.grayscale()
+        # Stacking
+        self.target = (self.target + grayscale_img) / 2
+        self.truncate()
+        return True
+
+    def blurring(self):
+        """
+        Blur target image a little bit according to BOX BLUR algorithm
+        """
+        new_img = cp.deepcopy(self.target)
+        for x in range(self.target.shape[0]):
+            for y in range(self.target.shape[1]):
+                # Check if out range
+                if x < 1 or y < 1 or x + 1 >= self.target.shape[0] or y + 1 >= self.target.shape[1]:
+                    continue
+
+                s = np.zeros(3)  # Initial sum of pixels
+                # Get pixel by pixel and add to s
+                for dx in BOX_RANGE:
+                    for dy in BOX_RANGE:
+                        s = s + self.target[x + dx, y + dy]
+                # Evaluate average
+                new_img[x, y] = s * 1 / 9
+        # Set to int element
+        self.target = new_img.astype(int)
 
 
 if __name__ == "__main__":
@@ -116,7 +183,7 @@ if __name__ == "__main__":
     while selected not in range(len(editor.images)):
         print("Invalid index, please input again: ")
         selected = int_input()
-    editor.set_target(index=selected)
+    editor.set_target(tar_index=selected)
     # Program main stuff started
     selected = not EXIT
     while selected != EXIT:
@@ -130,10 +197,8 @@ if __name__ == "__main__":
         # Do stuff
         if selected == BRIGHTNESS:
             # Input factor
-            factor = input("Input factor to adjust brightness must be in range [-100:100] for best: ")
-            while not factor.isnumeric():
-                factor = input("Invalid input, please input again: ")
-            factor = int(factor)
+            print("Input factor to adjust brightness must be in range [-100:100] for best: ", end="")
+            factor = int(input())
             # Adjusting
             print("Adjusting ...")
             editor.adjust_contrast_brightness(brightness_factor=factor)
@@ -143,7 +208,7 @@ if __name__ == "__main__":
         elif selected == CONTRAST:
             # Input level
             print("Input level of contrast to adjust brightness must be in range [-255:255] to work properly: ", end="")
-            level = int_input()
+            level = int(input())
             # Evaluate factor
             factor = contrast_factor_evaluation(level)
             print("Factor is:", factor)
@@ -162,5 +227,58 @@ if __name__ == "__main__":
             editor.reset()
             print("Done. Check it out.")
             editor.show_img()
+        elif selected == FLIP:
+            print("Index\t|\tStuff")
+            print("1\t\t|\tLeft to Right.")
+            print("2\t\t|\tUp to Down.")
+            print("Your choose: ")
+            index = int_input()
+            while index not in range(1, 3):
+                print("Invalid index, please enter again: ")
+                index = int_input()
+            print("Flipping ...")
+            editor.flip(lr=index == 1)
+            print("Done. Check it out")
+            editor.show_img()
+        elif selected == GRAYSCALE:
+            print("Converting ...")
+            editor.grayscale()
+            print("Done. Check it out.")
+            editor.show_img()
+        elif selected == CHANGE_IMAGE:
+            editor.list_images()
+            print("Select index of image in list that you want to adjust!\nYour choose: ", end="")
+            selected = int_input()
+            while selected not in range(len(editor.images)):
+                print("Invalid index, please input again: ")
+                selected = int_input()
+            editor.set_target(tar_index=selected)
+        elif selected == EXIT:
+            print("Exiting ...")
+            break
+        elif selected == STACKING:
+            new_editor = MyImageEditor()
+            new_editor.update_images()
+            new_editor.list_images()
+            # Select image
+            print("Select index of image in list that you want to stack with target!\nYour choose: ", end="")
+            selected = int_input()
+            while selected not in range(len(new_editor.images)):
+                print("Invalid index, please input again: ")
+                selected = int_input()
+            new_editor.set_target(tar_index=selected)
+            print("Stacking ...")
+            new_editor.grayscale()
+            is_stacked = editor.stack(new_editor.target)
+            print("Done. Check it out.")
+            if is_stacked:
+                editor.show_img()
+        elif selected == BLURRING:
+            print("Blurring ...")
+            editor.blurring()
+            print("Done. Check it out.")
+            editor.show_img()
         else:
             print("This feature not available yet, please choose another feature")
+
+    print("Thanks for using!")
